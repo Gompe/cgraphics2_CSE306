@@ -16,3 +16,15 @@ void boxMuller(double stdev, double &x, double &y) {
 	x = sqrt(-2 * log(r1))*cos(2 * M_PI *r2)*stdev;
 	y = sqrt(-2 * log(r1))*sin(2 * M_PI *r2)*stdev;
 }
+
+void randomSpherePoint(double &x, double &y, double &z){
+    double r1 = random_uniform();
+    double r2 = random_uniform();
+
+    double theta = 2*M_PI*r1;
+    double scale = sqrt(r2*(1-r2));
+
+    x = cos(theta)*scale;
+    y = sin(theta)*scale;
+    z = 1 - 2*r2;
+}

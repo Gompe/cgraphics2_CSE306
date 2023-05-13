@@ -8,4 +8,4 @@
 
 double random_uniform();
 void boxMuller(double stdev, double &x, double &y);
-
+void randomSpherePoint(double &x, double &y, double &z);
