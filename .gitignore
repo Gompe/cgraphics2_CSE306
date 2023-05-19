@@ -1,1 +1,9 @@
 protected
+
+# svg files
+after.svg
+before.svg
+
+# executables / object files
+run
+lbfgs.o

@@ -218,7 +218,7 @@ private:
 
     void m_UpdateCells()
     {
-        cells = powerDiagram(sites, weights);
+        cells = fastPowerDiagram(sites, weights);
     }
 
     void m_UpdateParams()
