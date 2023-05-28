@@ -11,5 +11,8 @@ all: $(DEPS) $(SRCS) $(OBJS)
 lbfgs.o: ./lib_lbfgs/lbfgs.c
 	g++ ./lib_lbfgs/lbfgs.c -c -o lbfgs.o
 
+fluid: $(DEPS) $(SRCS) $(OBJS)
+	$(CXX) $(CXXFLAGS) $(SRCS) $(OBJS) -fopenmp -o fluid
+
 clean:
 	rm -f run lbfgs.o

@@ -1,3 +1,8 @@
+#pragma once
+
+#ifndef BINARY_TREE_H
+#define BINARY_TREE_H
+
 #include<iostream>
 
 namespace binary_tree {
@@ -48,3 +53,5 @@ namespace binary_tree {
         }
     };
 }
+
+#endif

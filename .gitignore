@@ -1,4 +1,6 @@
 protected
+.vscode
+frames
 
 # svg files
 after.svg

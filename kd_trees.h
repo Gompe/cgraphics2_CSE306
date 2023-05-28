@@ -1,5 +1,8 @@
 #pragma once
 
+#ifndef KD_TREE_H
+#define KD_TREE_H
+
 #include <algorithm>
 #include <vector>
 #include <cassert>
@@ -184,3 +187,5 @@ private:
             nearestNeighborSearch(goSecond, nns);
     }
 };
+
+#endif
