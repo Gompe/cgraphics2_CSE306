@@ -21,6 +21,8 @@ public:
     FluidSolver() = delete;
     FluidSolver(Fluid *owner);
 
+    void InitializeVariablesArray();
+
     int Run();
 
     lbfgsfloatval_t Evaluate(
@@ -48,9 +50,10 @@ public:
     double ComputeFluidArea() const;
     double ComputeAirArea() const;
 
-    double Functional(const lbfgsfloatval_t *x) const;
-    std::vector<double> GradientFunctional(const lbfgsfloatval_t *x) const;
+    double Functional() const;
+    std::vector<double> GradientFunctional() const;
 
+    void AdjustWeights();
     void GradientAscent(int n_iter, double lr);
 };
 
@@ -67,10 +70,12 @@ public:
     double volume_air;
 
     // Physical constants
-    const double k_volume_fluid = 0.2;
-    const double k_volume_air = 0.8;
+    const double k_min_diff_weights = 1E-3;
+
+    const double k_volume_fluid = 0.3;
+    const double k_volume_air = 0.7;
     const double k_elasticity = 0.5;
-    const double k_epsilon = 2;
+    const double k_epsilon = 0.004;
     const Vector k_g = Vector(0., -10., 0.); 
 
     std::unique_ptr<FluidSolver> solver;
@@ -86,8 +91,13 @@ public:
 
     void InitializeParameters();
 
-    void Run(double dt, int num_frames);
-    void OneStep(double dt);
+    void SaveFrame(const int frameid) const;
+
+    void Run(const double dt, const int num_frames);
+    
+    // Physics
+    void ComputeFluidCells();
+    std::vector<Vector> ComputeForces() const;
 
 private:
     void BounceParticlesBack();    

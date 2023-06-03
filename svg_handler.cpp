@@ -130,14 +130,15 @@ void save_frame(const std::vector<Polygon> &_cells, std::string filename, int fr
                 }
                 if (isInside) {
                     //if (i < N) {   // the N first particles may represent fluid, displayed in blue
-                    //  image[((H - y - 1)*W + x) * 3] = 0;
-                    //  image[((H - y - 1)*W + x) * 3 + 1] = 0;
-                    //  image[((H - y - 1)*W + x) * 3 + 2] = 255;
+                    image[((H - y - 1)*W + x) * 3] = 0;
+                    image[((H - y - 1)*W + x) * 3 + 1] = 0;
+                    image[((H - y - 1)*W + x) * 3 + 2] = 255;
                     //}
+                    
                     if (mindistEdge <= 2) {
                         image[((H - y - 1)*W + x) * 3] = 0;
                         image[((H - y - 1)*W + x) * 3 + 1] = 0;
-                        image[((H - y - 1)*W + x) * 3 + 2] = 255;
+                        image[((H - y - 1)*W + x) * 3 + 2] = 0;
                     }
 
                 }

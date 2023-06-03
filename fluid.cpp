@@ -12,21 +12,24 @@ FluidSolver::FluidSolver(Fluid *owner) :
 }
 
 int FluidSolver::Run() {
-    lbfgsfloatval_t fx;
 
     ReserveMemory(num_particles + 1);
 
-    // Initialize variables array
-    for (int i = 0; i < num_particles; i++) {
-        m_variables[i] = (lbfgsfloatval_t) owner->weights[i]/owner->bounding_box.AbsArea();
-    }
+    InitializeVariablesArray();
 
-    m_variables[num_particles] = owner->weight_air/owner->bounding_box.AbsArea();
-
+    lbfgsfloatval_t fx;
     int ret = CallLBFGS(num_particles + 1, &fx);
 
     printf("INFO: L-BFGS optimization terminated with status code = %d\n", ret);
     return ret;
+}
+
+void FluidSolver::InitializeVariablesArray() {
+    for (int i = 0; i < num_particles; i++) {
+        m_variables[i] = (lbfgsfloatval_t) owner->weights[i];
+    }
+
+    m_variables[num_particles] = (lbfgsfloatval_t) owner->weight_air;
 }
 
 lbfgsfloatval_t FluidSolver::Evaluate(
@@ -41,10 +44,8 @@ lbfgsfloatval_t FluidSolver::Evaluate(
     UpdateWeights();
     UpdateCells();
 
-    lbfgsfloatval_t fx = 0.0;
-
-    fx = (lbfgsfloatval_t) Functional(x);
-    std::vector<double> grad = GradientFunctional(x);
+    lbfgsfloatval_t fx = (lbfgsfloatval_t) Functional();
+    std::vector<double> grad = GradientFunctional();
 
     // Swap signs because we are maximizing 
     fx = -fx;
@@ -106,32 +107,28 @@ double FluidSolver::ComputeAirArea() const {
     return box_area - ComputeFluidArea();
 }
 
-double FluidSolver::Functional(const lbfgsfloatval_t *W) const {
+double FluidSolver::Functional() const {
     double output = 0.;
+
+    double expected_particle_area = (owner->volume_fluid/(double) num_particles);
 
     // Terms coming from the fluid particles
     for (int i = 0; i < num_particles; i++) {
-        // Computing integral
-        double integral = EnergyIntegral(owner->cells[i], owner->positions[i]);
-        integral -= owner->cells[i].AbsArea() * owner->weights[i];
-
-        // Adding to output
-        output += integral;
-        output += (owner->volume_fluid/num_particles) * owner->weights[i];
+        output += EnergyIntegral(owner->cells[i], owner->positions[i]) +
+                  owner->weights[i] * (expected_particle_area - owner->cells[i].AbsArea());
     }
 
     // Terms coming from the air particles
-    output += owner->volume_air * owner->weight_air;
-    output -= owner->weight_air * ComputeAirArea();
+    output += owner->weight_air * (owner->volume_air - ComputeAirArea());
 
     return output;
 }
 
-std::vector<double> FluidSolver::GradientFunctional(const lbfgsfloatval_t *W) const {
+std::vector<double> FluidSolver::GradientFunctional() const {
     std::vector<double> gradient(num_particles + 1);
 
     for (int i = 0; i < num_particles; i++) {
-        gradient[i] = (owner->volume_fluid/num_particles) - owner->cells[i].AbsArea();
+        gradient[i] = (owner->volume_fluid/(double) num_particles) - owner->cells[i].AbsArea();
     }
 
     // Air weight
@@ -139,29 +136,53 @@ std::vector<double> FluidSolver::GradientFunctional(const lbfgsfloatval_t *W) co
     return gradient;
 }
 
+void FluidSolver::AdjustWeights() {
+    const double weight_air = m_variables[num_particles];
+    const double weight_lb = weight_air + (owner->volume_fluid/(double) num_particles)/M_PI;
+
+    auto adjust_weight = [&](lbfgsfloatval_t &w){
+        w = std::max(w, (lbfgsfloatval_t) weight_lb) - (lbfgsfloatval_t) weight_air;
+    };
+    
+    std::for_each(m_variables, m_variables + num_particles, adjust_weight);
+    m_variables[num_particles] = 0.;
+}
+
 void FluidSolver::GradientAscent(int n_iter, double lr) {
     ReserveMemory(num_particles + 1);
 
     for (int k = 0; k < num_particles; k++) {
-        m_variables[k] = owner->weights[k]/owner->bounding_box.AbsArea();
+        m_variables[k] = owner->weights[k];
     }
-    m_variables[num_particles] = owner->weight_air/owner->bounding_box.AbsArea();
+    m_variables[num_particles] = owner->weight_air;
 
+// DEBUG
+    AdjustWeights();
     UpdateWeights();
     UpdateCells();
 
-    double fx = Functional(m_variables);
+    return;
+// END DEBUG
+
+    double fx = Functional();
+    std::cout << "GA enter: fx = " << fx << std::endl;
 
     for (int iter = 0; iter < n_iter; iter++) {
-        std::vector<double> grad = GradientFunctional(m_variables);
+        std::vector<double> grad = GradientFunctional();
         for (int k = 0; k < num_particles + 1; k++) {
             m_variables[k] += (lbfgsfloatval_t) lr * grad[k];
         }
+        // Make sure that weight_air is not larger than any fluid weight
+        // m_variables[num_particles] = std::min(m_variables[num_particles],
+        //     *std::min_element(m_variables, m_variables + num_particles));
+        AdjustWeights();
+
         UpdateWeights();
         UpdateCells();
     }
 
-    fx = Functional(m_variables);
+    fx = Functional();
+    std::cout << "GA leave: fx = " << fx << std::endl;
 }
 
 int FluidSolver::Progress(
@@ -198,80 +219,108 @@ void Fluid::InitializeParameters() {
 
     velocities.resize(num_particles);
 
-    weights.resize(num_particles);
-    std::fill(weights.begin(), weights.end(), 1);
-
-    weight_air = 0;
-
-    double box_area = bounding_box.AbsArea();
+    const double box_area = bounding_box.AbsArea();
     volume_fluid = k_volume_fluid * box_area;
     volume_air = k_volume_air * box_area;
+
+    const double estimated_cell_area = (volume_fluid/(double) num_particles) / M_PI;
+
+    weights.resize(num_particles);
+    std::fill(weights.begin(), weights.end(), estimated_cell_area);
+
+    weight_air = 0;
 
     cells.resize(num_particles);
     solver.reset(new FluidSolver(this)); 
 }
 
-void Fluid::Run(double dt, int num_frames) {
+void Fluid::SaveFrame(const int frameid) const {
+    std::vector<Polygon> particles;
 
-    // std::vector<Polygon> particles;
     // for (int i = 0; i < num_particles; i++) {
-    //     particles.push_back(CreateDiscretizedDisk(positions[i], 0.05, 50));
+    //     particles.push_back(CreateDiscretizedDisk(positions[i], 0.01, 50));
     // }
-    // particles = StandardizeCells(particles, bounding_box);
-    // save_frame(particles, "./frames/frame", 0);
+    particles.insert(particles.begin(), cells.begin(), cells.end());
+    particles = StandardizeCells(particles, bounding_box);
 
-    for (int frameid = 1; frameid < num_frames; frameid++) {
-        OneStep(dt);
+    save_frame(particles, "./frames/frame", frameid);
+}
 
-        std::vector<Polygon> particles;
+void Fluid::Run(const double dt, const int num_frames) {
 
-        for (int i = 0; i < num_particles; i++) {
-            particles.push_back(CreateDiscretizedDisk(positions[i], 0.01, 50));
-        }
-        particles.insert(particles.begin(), cells.begin(), cells.end());
-        particles = StandardizeCells(particles, bounding_box);
+    auto time_step_update = [dt](auto &X, auto &X_prime) {
+        auto update_one = [dt](auto x, auto x_prime) {
+            return x + dt * x_prime;
+        };
 
-        save_frame(particles, "./frames/frame", frameid);
+        std::transform(X.begin(), X.end(), X_prime.begin(), X.begin(),
+                       update_one);
+    };
+
+    for (int frameid = 0; frameid < num_frames; frameid++) {
+        ComputeFluidCells();
+
+        std::cout << "\tWeight air: " << weight_air << std::endl;
+        std::cout << "\tMin Weight: " << *std::min_element(weights.begin(), weights.end()) << std::endl;
+        std::cout << "\tMax Weight: " << *std::max_element(weights.begin(), weights.end()) << std::endl;
+        std::cout << "\tMean Weight: " << std::accumulate(weights.begin(), weights.end(), 0.)/num_particles << std::endl;
+
+
+        // Show the particles and the cells
+        SaveFrame(frameid); 
+
+        std::vector<Vector> forces = ComputeForces();
+        
+        const double mass = 200 * (volume_fluid / (double) num_particles);
+        std::vector<Vector> accelerations(num_particles);
+
+        std::transform(forces.begin(), forces.end(), accelerations.begin(), 
+                       [mass](auto f){ return f / mass; });
+
+        // Update velocites
+        time_step_update(velocities, forces);
+
+        //Update Positions
+        time_step_update(positions, velocities);
+
+        // Handle particles out of the domain
+        BounceParticlesBack();
     }
 }
 
-void Fluid::OneStep(double dt) {
-    // weights, weight_air = OT
-
-    weight_air = 0;
-    std::fill(weights.begin(), weights.end(), 1);
-    
+void Fluid::ComputeFluidCells() {
+    // Run Optimal Transport Algorithm
     solver->Run();
-    // solver->GradientAscent(1000, 1E-8);
 
-    std::vector<double> DEBUG_ACCELERATIONS;
+    // Fine-tune with gradient descent
+    solver->GradientAscent(200, 5E-3);
+}
+
+std::vector<Vector> Fluid::ComputeForces() const {
+    const double mass = 200; // * (volume_fluid / (double) num_particles);
+    std::vector<Vector> forces;
 
     for (int i = 0; i < num_particles; i++) {
-        // Mass of the particle
-        double mass = 200 * (volume_fluid / (double) num_particles);
+        const Vector centroid = [&](){
+            if (this->cells[i].size() == 0) {
+                return this->positions[i];
+            }
+            else {
+                return this->cells[i].Centroid();
+            }
+        }();
 
-        // Force
-        Vector centroid;
-
-        if (cells[i].size() == 0) {
-            centroid = Vector();
+//DEBUG
+        if (i == 0) {
+            std::cout << "First component (g): " << mass * k_g << std::endl;
+            std::cout << "Second component " << (centroid - positions[i])/(k_epsilon * k_epsilon) << std::endl;
         }
-        else {
-            centroid = cells[i].Centroid();
-        }
+// END DEBUG
 
-        Vector F = 1/(k_epsilon * k_epsilon) * (centroid - positions[i]);
-        F += mass * k_g;
-
-        // Get acceleration (Newton's Law)
-        Vector a = F/mass;
-        velocities[i] = velocities[i] + dt * a;
-
-        // Update Position
-        positions[i] = positions[i] + dt * velocities[i];
+        forces.push_back(mass * k_g + (centroid - positions[i])/(k_epsilon * k_epsilon));
     }
 
-    this->BounceParticlesBack();
+    return forces;
 }
 
 void Fluid::BounceParticlesBack() {
