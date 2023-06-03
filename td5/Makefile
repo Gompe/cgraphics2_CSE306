@@ -13,6 +13,3 @@ all:
 colorMatching: colorMatching.cpp $(SRCS) $(DEPS)
 	$(CXX) $(CXXFLAGS) colorMatching.cpp $(SRCS) -fopenmp -o colorMatching
 
-shrinkImage: shrinkImage.cpp $(SRCS) $(DEPS)
-	$(CXX) $(CXXFLAGS) shrinkImage.cpp $(SRCS) -fopenmp -o shrinkImage
-	
