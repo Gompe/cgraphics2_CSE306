@@ -97,7 +97,7 @@ class AcceleratedPowerDiagram
     const int N;
     const double M;
 
-    std::unique_ptr< KdTree<3> > ptrKdTree;
+    std::unique_ptr< KdTree<2> > ptrKdTree;
 
 public:
     AcceleratedPowerDiagram& operator=(const AcceleratedPowerDiagram &other) = delete;

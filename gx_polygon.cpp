@@ -438,7 +438,7 @@ AcceleratedPowerDiagram::AcceleratedPowerDiagram(
         liftedSites[i] = sites[i] + Vector(0., 0., sqrt(this->M - weights[i]));
     }
     // Initialize KdTree
-    ptrKdTree = std::make_unique< KdTree<3> >(liftedSites);
+    ptrKdTree = std::make_unique< KdTree<2> >(liftedSites);
 }
 
 std::vector<Vector> AcceleratedPowerDiagram::LiftedKNN(Vector P, double weight, int k) const {
