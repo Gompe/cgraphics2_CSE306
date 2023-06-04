@@ -20,7 +20,7 @@ int FluidSolver::Run() {
     lbfgsfloatval_t fx;
     int ret = CallLBFGS(num_particles + 1, &fx);
 
-    printf("INFO: L-BFGS optimization terminated with status code = %d\n", ret);
+    // printf("INFO: L-BFGS optimization terminated with status code = %d\n", ret);
     return ret;
 }
 
@@ -108,15 +108,26 @@ double FluidSolver::ComputeAirArea() const {
 }
 
 double FluidSolver::Functional() const {
-    double output = 0.;
 
-    double expected_particle_area = (owner->volume_fluid/(double) num_particles);
+    const double expected_particle_area = (owner->volume_fluid/(double) num_particles);
 
     // Terms coming from the fluid particles
-    for (int i = 0; i < num_particles; i++) {
-        output += EnergyIntegral(owner->cells[i], owner->positions[i]) +
-                  owner->weights[i] * (expected_particle_area - owner->cells[i].AbsArea());
+    auto output_term = [this, expected_particle_area](auto i){
+        return EnergyIntegral(this->owner->cells[i], this->owner->positions[i]) +
+                  this->owner->weights[i] * (expected_particle_area - this->owner->cells[i].AbsArea());
+    };
+
+    double output = 0.;
+    #pragma omp parallel for reduction(+:output)
+    for (size_t i = 0; i < num_particles; i++) {
+        const auto term = output_term(i);
+        output += term;
     }
+
+    // for (int i = 0; i < num_particles; i++) {
+    //     output += EnergyIntegral(owner->cells[i], owner->positions[i]) +
+    //               owner->weights[i] * (expected_particle_area - owner->cells[i].AbsArea());
+    // }
 
     // Terms coming from the air particles
     output += owner->weight_air * (owner->volume_air - ComputeAirArea());
@@ -156,33 +167,24 @@ void FluidSolver::GradientAscent(int n_iter, double lr) {
     }
     m_variables[num_particles] = owner->weight_air;
 
-// DEBUG
-    AdjustWeights();
-    UpdateWeights();
-    UpdateCells();
-
-    return;
-// END DEBUG
-
-    double fx = Functional();
-    std::cout << "GA enter: fx = " << fx << std::endl;
+    // double fx = Functional();
+    // std::cout << "GA enter: fx = " << fx << std::endl;
 
     for (int iter = 0; iter < n_iter; iter++) {
         std::vector<double> grad = GradientFunctional();
-        for (int k = 0; k < num_particles + 1; k++) {
+        // Not updating w_air
+        for (int k = 0; k < num_particles; k++) {
             m_variables[k] += (lbfgsfloatval_t) lr * grad[k];
         }
         // Make sure that weight_air is not larger than any fluid weight
-        // m_variables[num_particles] = std::min(m_variables[num_particles],
-        //     *std::min_element(m_variables, m_variables + num_particles));
-        AdjustWeights();
+        // AdjustWeights();
 
         UpdateWeights();
         UpdateCells();
     }
 
-    fx = Functional();
-    std::cout << "GA leave: fx = " << fx << std::endl;
+    // fx = Functional();
+    // std::cout << "GA leave: fx = " << fx << std::endl;
 }
 
 int FluidSolver::Progress(
@@ -237,13 +239,11 @@ void Fluid::InitializeParameters() {
 void Fluid::SaveFrame(const int frameid) const {
     std::vector<Polygon> particles;
 
-    // for (int i = 0; i < num_particles; i++) {
-    //     particles.push_back(CreateDiscretizedDisk(positions[i], 0.01, 50));
-    // }
     particles.insert(particles.begin(), cells.begin(), cells.end());
     particles = StandardizeCells(particles, bounding_box);
 
     save_frame(particles, "./frames/frame", frameid);
+    std::cout << "Saved frame " << frameid << std::endl;
 }
 
 void Fluid::Run(const double dt, const int num_frames) {
@@ -260,12 +260,6 @@ void Fluid::Run(const double dt, const int num_frames) {
     for (int frameid = 0; frameid < num_frames; frameid++) {
         ComputeFluidCells();
 
-        std::cout << "\tWeight air: " << weight_air << std::endl;
-        std::cout << "\tMin Weight: " << *std::min_element(weights.begin(), weights.end()) << std::endl;
-        std::cout << "\tMax Weight: " << *std::max_element(weights.begin(), weights.end()) << std::endl;
-        std::cout << "\tMean Weight: " << std::accumulate(weights.begin(), weights.end(), 0.)/num_particles << std::endl;
-
-
         // Show the particles and the cells
         SaveFrame(frameid); 
 
@@ -278,7 +272,7 @@ void Fluid::Run(const double dt, const int num_frames) {
                        [mass](auto f){ return f / mass; });
 
         // Update velocites
-        time_step_update(velocities, forces);
+        time_step_update(velocities, accelerations);
 
         //Update Positions
         time_step_update(positions, velocities);
@@ -293,7 +287,7 @@ void Fluid::ComputeFluidCells() {
     solver->Run();
 
     // Fine-tune with gradient descent
-    solver->GradientAscent(200, 5E-3);
+    solver->GradientAscent(100, 0.05);
 }
 
 std::vector<Vector> Fluid::ComputeForces() const {
@@ -310,13 +304,6 @@ std::vector<Vector> Fluid::ComputeForces() const {
             }
         }();
 
-//DEBUG
-        if (i == 0) {
-            std::cout << "First component (g): " << mass * k_g << std::endl;
-            std::cout << "Second component " << (centroid - positions[i])/(k_epsilon * k_epsilon) << std::endl;
-        }
-// END DEBUG
-
         forces.push_back(mass * k_g + (centroid - positions[i])/(k_epsilon * k_epsilon));
     }
 
@@ -332,24 +319,24 @@ void Fluid::BounceParticlesBack() {
     for (int i = 0; i < num_particles; i++) {
         // Left Border
         if (positions[i][0] < min_x) {
-            positions[i][0] = min_x + (min_x - positions[i][0]);
+            positions[i][0] = min_x + k_elasticity * (min_x - positions[i][0]);
             velocities[i][0] *= -k_elasticity;
         }
         // Right Border
         if (positions[i][0] > max_x) {
-            positions[i][0] = max_x + (max_x - positions[i][0]);
+            positions[i][0] = max_x + k_elasticity * (max_x - positions[i][0]);
             velocities[i][0] *= -k_elasticity;
         }
 
         // Bottom Border
         if (positions[i][1] < min_y) {
-            positions[i][1] = min_y + (min_y - positions[i][1]);
+            positions[i][1] = min_y + k_elasticity * (min_y - positions[i][1]);
             velocities[i][1] *= -k_elasticity;
         }
 
         // Top Border
         if (positions[i][1] > max_y) {
-            positions[i][1] = max_y + (max_y - positions[i][1]);
+            positions[i][1] = max_y + k_elasticity * (max_y - positions[i][1]);
             velocities[i][1] *= -k_elasticity;
         }
     }

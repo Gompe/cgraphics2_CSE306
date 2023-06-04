@@ -75,7 +75,7 @@ public:
     const double k_volume_fluid = 0.3;
     const double k_volume_air = 0.7;
     const double k_elasticity = 0.5;
-    const double k_epsilon = 0.004;
+    const double k_epsilon = 0.01; // original 0.004
     const Vector k_g = Vector(0., -10., 0.); 
 
     std::unique_ptr<FluidSolver> solver;

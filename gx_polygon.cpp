@@ -138,7 +138,6 @@ double EnergyIntegral(const Polygon &P, const Vector &y) {
         }
 
         double T = 0.5 * cross(c[1] - c[0], c[2] - c[0]).norm();
-        // std::cout << "sum: " << sum << std::endl;
 
         integral += std::abs(T * sum / 6.);
     }
@@ -348,8 +347,13 @@ static Polygon ClipByAxis(Polygon subject, const Vector &P, const Vector &Q,
             if (!InBoundingBox(intersection, bounding_box)) {
                 std::cout << "Intersection not in bounding box: " << intersection << std::endl;
                 std::cout << "p1 " << p1 << " p2 " << p2 << std::endl;
-                std::cout << "P " << P << " Q " << Q << std::endl;
+                std::cout << "P  " << P  << " Q  " << Q << std::endl;
                 std::cout << "delta_w " << delta_w << std::endl;
+                
+                std::cout << "------------------------------------------------------\n";
+                std::cout << "Distances d(p1, P) - d(p1, Q)" << (p1 - P).norm2() - (p1 - Q).norm2() << std::endl; 
+                std::cout << "Distances d(p2, P) - d(p2, Q)" << (p2 - P).norm2() - (p2 - Q).norm2() << std::endl; 
+
                 exit(1);
             }
 
@@ -382,7 +386,7 @@ std::vector<Polygon> PowerDiagram(
     #pragma omp parallel for
     for (int site_idx = 0; site_idx < N; site_idx++) {
         Vector P = sites[site_idx];
-        double weight_P = weights[site_idx];
+        const double weight_P = weights[site_idx];
 
         // Dither P to avoid perfect parallelism and other problematic conditions
         DitherVector(P);
@@ -447,58 +451,72 @@ std::vector<Polygon> AcceleratedPowerDiagram::MakeDiagram(const Polygon &boundin
     std::vector<Polygon> cells(N);
 
     #pragma omp parallel for
-    for (int siteIdx=0; siteIdx<N; siteIdx++) {
-        Vector P = sites[siteIdx];
-        double weight_P = weights[siteIdx];
+    for (size_t siteIdx = 0; siteIdx < N; siteIdx++) {
+        
+        auto get_dithered = [](auto P) {
+            DitherVector(P);
+            return P;
+        };
+        
+        const Vector P = get_dithered(sites[siteIdx]);
+        const double weight_P = weights[siteIdx];
 
-        DitherVector(P);
-        Vector lifted_P = P + Vector(0., 0., sqrt(M - weight_P));
+        const Vector lifted_P = P + Vector(0., 0., sqrt(M - weight_P));
 
         Polygon cell = bounding_box;
 
         int k = polygon_detail::knn_min_k;
         int start_idx = 1;
 
-        std::vector<Vector> nearest_neighbors_3d;
 
-        do {
+        for (;;) {
             // Get k+1 nearest neighbors (nearest neighbor is P itself)
-            nearest_neighbors_3d = LiftedKNN(P, weight_P, k+1);
 
-            for (int idx=start_idx; idx < nearest_neighbors_3d.size(); idx++) {
-                // Unlift Q
-                Vector Q = nearest_neighbors_3d[idx];
-                double weight_Q = M - Q[2] * Q[2];
-                Q[2] = 0.;
+            const std::vector<Vector> nearest_neighbors_3d = LiftedKNN(P, weight_P, k+1);
+            const size_t num_neighbors = nearest_neighbors_3d.size();
 
-                double delta_W = weight_P - weight_Q;
-                cell = ClipByAxis(cell, P, Q, delta_W, bounding_box);
+            for (size_t idx = start_idx; idx < num_neighbors; idx++) {
+                const Vector Q = nearest_neighbors_3d[idx] * Vector(1., 1., 0.);
+                
+                // retrieving the weight of Q
+                const double z_Q = nearest_neighbors_3d[idx][2];
+                const double weight_Q = M - z_Q * z_Q;
+
+                const double delta_w = weight_P - weight_Q;
+                cell = ClipByAxis(cell, P, Q, delta_w, bounding_box);
 
                 if (cell.size() == 0) break;
             }
 
-            // Checks to verify if the cell is finished
-            if (nearest_neighbors_3d.size() == N) break;
+            if (num_neighbors == N) break;
             if (cell.size() == 0) break;
 
             // Check if it is time to stop because no points can be closer to the cell
 
+            // Distance between lifted P and furthest point in the cell (squared)
+            auto get_furthest_distance_in_cell = [&lifted_P, &cell](){
+                double res = std::numeric_limits<double>::lowest();
+                for (size_t i=0; i < cell.size(); i++) {
+                    res = std::max(res, (cell[i] - lifted_P).norm2());
+                }
+                return res;
+            };
+
+
             // Distance between lifted P and furthest point in the cell squared
-            double largest_cell_dist2 = std::numeric_limits<double>::lowest();
-            for (int i=0; i < cell.size(); i++) {
-                largest_cell_dist2 = std::min(largest_cell_dist2, (cell[i] - lifted_P).norm2());
-            }
+            const double largest_cell_dist2 = get_furthest_distance_in_cell();
 
             // Distance between P and kth nearest neighbor squared
-            double largest_point_dist2 = (lifted_P - nearest_neighbors_3d[nearest_neighbors_3d.size() - 1]).norm2();
+
+            const double largest_point_dist2 = (lifted_P - nearest_neighbors_3d[num_neighbors - 1]).norm2();
 
             // It is impossible that any point from this point on will change the cell
-            if (4 * largest_cell_dist2 <= largest_point_dist2) break;
+            if (4. * largest_cell_dist2 < largest_point_dist2) break;
 
             // Set new parameters for the search
-            start_idx = nearest_neighbors_3d.size();
+            start_idx = num_neighbors;
             k *= 2;
-        } while(1);
+        }
 
         // Store computed result
         cells[siteIdx] = cell;

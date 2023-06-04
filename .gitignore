@@ -3,9 +3,8 @@ protected
 frames
 
 # svg files
-after.svg
-before.svg
-
+*.svg
 # executables / object files
 run
 lbfgs.o
+*.exe

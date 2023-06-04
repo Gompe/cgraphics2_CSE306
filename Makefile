@@ -12,7 +12,14 @@ lbfgs.o: ./lib_lbfgs/lbfgs.c
 	g++ ./lib_lbfgs/lbfgs.c -c -o lbfgs.o
 
 fluid: $(DEPS) $(SRCS) $(OBJS)
-	$(CXX) $(CXXFLAGS) $(SRCS) $(OBJS) -fopenmp -o fluid
+	$(CXX) $(CXXFLAGS) $(SRCS) $(OBJS) main_fluid.cc -fopenmp -o fluid.exe
+
+voronoi: $(SRCS) $(DEPS) $(OBJS)
+	$(CXX) $(CXXFLAGS) $(SRCS) $(OBJS) main_voronoi.cc -fopenmp -o voronoi.exe
+
+laguerre: $(SRCS) $(DEPS) $(OBJS)
+	$(CXX) $(CXXFLAGS) $(SRCS) $(OBJS) main_laguerre.cc -fopenmp -o laguerre.exe
+
 
 clean:
 	rm -f run lbfgs.o

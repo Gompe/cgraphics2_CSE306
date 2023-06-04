@@ -18,7 +18,7 @@ int LaguerreSolver::Run() {
 
     int ret = CallLBFGS(num_sites, &fx);
 
-    printf("INFO: L-BFGS optimization terminated with status code = %d\n", ret);
+    // printf("INFO: L-BFGS optimization terminated with status code = %d\n", ret);
 
     return ret;
 }

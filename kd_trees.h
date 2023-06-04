@@ -13,179 +13,191 @@
 #define KD_TREE_DEBUG 0
 #define KD_TREE_CHECK_ALL_LIMIT 10
 
-using namespace binary_tree;
-using RandomIt = std::vector<Vector>::iterator;
+///////////////////////////////////////////////////////////////////////////////
+namespace {
+    using namespace binary_tree;
+}
 
-/// KdTree for the given number of dimensions
 template <size_t dim=2>
-class KdTree
-{
-    // Point Set
-    struct PS {
-        // Value at which the points are partitioned
-        double medianValue;
-        // indexes of first and last points in the set
-        RandomIt first, last;
-        // axis on which the set is partitioned
-        int axis;
+class KdTree {
+
+    struct SubspaceData {
+        size_t first, last;
+        size_t axis; 
+        double partition_value;
+
+        SubspaceData(const size_t first, const size_t last, const size_t axis, const double partition_value)
+            : first(first), last(last), axis(axis), partition_value(partition_value) {}
+
+        SubspaceData(const size_t first, const size_t last)
+            : first(first), last(last) {}
     };
 
-    struct NearestNeighborStruct {
-        // K Nearest Neighbors of P
+    struct KNN {
+        // Point P to do the search with
         const Vector P;
-        const int k;
-        std::vector<std::pair<double, RandomIt>> knn;
+        // Number of nearest neighbors to find
+        const size_t k;
+        // Const Reference to set of points in the KdTree
+        const std::vector<Vector> &points;
 
-        NearestNeighborStruct(const Vector &P, int k) : P(P), k(k){
-            knn.reserve(k);
-        }
+        // indices of the knn
+        std::vector<size_t> knn_indices; 
 
-        double maxDistance() const {
-            if (knn.size() < k)
+        KNN(const Vector &P, const size_t k, const std::vector<Vector> &points)
+            : P(P), k(k), points(points) {}
+        
+        double MaxDistance() const {
+            if (knn_indices.size() < k) {
                 return std::numeric_limits<double>::max();
-            return knn[0].first;
-        }
-
-        bool tryInsert(RandomIt it) {
-            double distance = (P - *it).norm2();
-            if (distance >= maxDistance()) {
-                return false;
-            }
-            
-            if (knn.size() < k) {
-                knn.push_back(std::make_pair(distance, it));
             }
             else {
-                std::pop_heap(knn.begin(), knn.end());
-                knn[k-1] = std::make_pair(distance, it);
+                return (points[knn_indices[0]] - P).norm2();
+            }
+        }
+
+        bool TryInsert(const size_t index) {
+            const double distance = (points[index] - P).norm2();
+            if (distance >= MaxDistance()) {
+                return false;
             }
 
-            std::push_heap(knn.begin(), knn.end());
+            auto comp = [this](auto idx1, auto idx2) {
+                return (this->P - this->points[idx1]).norm2() < (this->P - this->points[idx2]).norm2();
+            };
+
+            // This index should be included in the knn list
+            if (knn_indices.size() < k) {
+                knn_indices.push_back(index);
+            }
+            else {
+                std::pop_heap(knn_indices.begin(), knn_indices.end(), comp);
+                knn_indices[k - 1] = index;
+            }
+
+            std::push_heap(knn_indices.begin(), knn_indices.end(), comp);            
             return true;
-        }
+        } 
     };
 
-    std::vector<Vector> points;
-    BinaryTree<PS> tree;
+
+    std::vector<Vector> m_points;
+    BinaryTree<SubspaceData> m_tree;
 
 public:
     KdTree() = delete;
     KdTree(const KdTree &other) = delete;
+    KdTree(KdTree &&other) = delete;
     KdTree& operator=(const KdTree &other) = delete;
+    ~KdTree() = default;
 
     KdTree(const std::vector<Vector> &points)
-    : points(points)
-    {   
-        tree.root = new Node<PS>();
-        build(this->points.begin(), this->points.end(), 0, tree.root);
+        : m_points(points) {   
+
+        if (points.size() == 0) {
+            m_tree.root = nullptr;
+        }
+        else {
+            m_tree.root = Build(0, points.size(), 0);
+        }
     }
 
-    /// Returns the k nearest neighbors to point P in the set points
-    /// in an ARBITRARY ORDER
-    std::vector<Vector> kNearestNeihbors(const Vector &P, int k) const
-    {   
-        // Initialize structure
-        NearestNeighborStruct nns(P, k);
+    std::vector<Vector> KNearestNeighbors(const Vector &P, const size_t k) const {
+        KNN knn_struct(P, k, this->m_points);
+        NearestNeighborSearch(m_tree.root, knn_struct);
 
-        // Search for the nearest neighbors
-        nearestNeighborSearch(tree.root, nns);
+        std::vector<size_t> indices = knn_struct.knn_indices;
+        auto comp = [this, P](auto idx1, auto idx2) {
+                return (P - this->m_points[idx1]).norm2() < (P - this->m_points[idx2]).norm2();
+            };
 
-        std::vector<Vector> output;
-        std::for_each(nns.knn.begin(), nns.knn.end(), 
-            [&output](const auto &p){output.push_back(*p.second);});
+        std::sort_heap(indices.begin(), indices.end(), comp);
+        std::vector<Vector> out(indices.size());
 
-        return output;
+        std::transform(indices.begin(), indices.end(), out.begin(), [this](auto idx) {
+            return this->m_points[idx];
+        });
+
+        return out;
     }
 
-    /// Returns the k nearest neighbors to point P in the set points
-    /// sorted by distance.
-    /// Ties are decided aribitrarily.
-    std::vector<Vector> sortedKNearestNeighbors(const Vector &P, int k) const
-    {
-        auto knn = kNearestNeihbors(P, k);
-        std::stable_sort(knn.begin(), knn.end(), 
-            [&P](const Vector &Q, const Vector &R){ return (P-Q).norm2() < (P-R).norm2(); }
-            );
-        
-        return knn;
+    std::vector<Vector> sortedKNearestNeighbors(const Vector &P, int k) const {
+        return KNearestNeighbors(P, k);
+    }
+
+    void PrintPoints() const {
+        std::cout << "--------------------------------------------------------------\n";
+        std::cout<< "Printing KdTree - " << m_points.size() << " points\n";
+        std::for_each(m_points.begin(), m_points.end(), 
+        [](auto p){std::cout << p <<std::endl;});
+        std::cout << "--------------------------------------------------------------\n";
     }
 
 private:
-    void build(RandomIt first, RandomIt last, int axis, Node<PS> *node)
-    {
+    Node<SubspaceData> * Build(const size_t first, const size_t last, const size_t axis) {
+        assert(first != last);
 
-        #if KD_TREE_DEBUG
-            assert(first != last);
-        #endif
-
-        #if KD_TREE_DEBUG
-            printf("Build Trace: first index=%d, last index=%d\n",
-                (int) std::distance<std::vector<Vector>::const_iterator>(points.begin(), first),
-                (int) std::distance<std::vector<Vector>::const_iterator>(points.begin(), last)
-                );
-        #endif
-        
-        node->data.first = first;
-        node->data.last = last;
-        node->data.axis = axis;
-
-        int n = std::distance(first, last);
-        if (n == 1) {
-            return;
+        if (last == first + 1) {
+            const auto data = SubspaceData(first, last);
+            return new Node<SubspaceData>(data);
         }
 
-        RandomIt median = std::next(first, n/2);
-
-        // Compares a < b along axis
-        auto comparer = [axis](const Vector &a, const Vector &b){
-            return (a[axis] < b[axis]);
+        // Sort by points by position relative to axis
+        auto comp = [axis](auto p1, auto p2) {
+            return p1[axis] < p2[axis];
         };
 
-        // Partial Sort where median element goes to the right place
-        std::nth_element(first, median, last, comparer);
-        node->data.medianValue = (*median)[axis];
+        // Partition the points into two equal halves
+        const size_t median = first + (last - first)/2;
+        std::nth_element(
+            std::next(m_points.begin(), first),
+            std::next(m_points.begin(), median),
+            std::next(m_points.begin(), last),
+            comp
+        );
+        
+        const double partition_value = m_points[median][axis];
+        const auto data = SubspaceData(first, last, axis, partition_value);
 
-        int newAxis = (axis + 1) % dim;
+        const size_t new_axis = (axis + 1) % dim;
 
-        node->left = new Node<PS>();
-        build(first, median, newAxis, node->left);
+        auto node = new Node<SubspaceData>(data);
+        node->left = Build(first, median, new_axis);
+        node->right = Build(median, last, new_axis);
 
-        node->right = new Node<PS>();
-        build(median, last, newAxis, node->right);
+        return node;
     }
 
-    void nearestNeighborSearch(const Node<PS> *node, NearestNeighborStruct &nns) const
-    {   
-        // Base Cases -- there are few nearest neighbors to check
-        if (node == nullptr) {
-            return; 
-        }
-
-        #if KD_TREE_DEBUG
-            printf("Search Trace: first index=%d, last index=%d\n",
-                (int) std::distance<std::vector<Vector>::const_iterator>(points.begin(), node->data.first),
-                (int) std::distance<std::vector<Vector>::const_iterator>(points.begin(), node->data.last)
-                );
-        #endif
-
-        if (KD_TREE_CHECK_ALL_LIMIT >= std::distance(node->data.first, node->data.last)) {
-            for (RandomIt it=node->data.first; it != node->data.last; it++) {
-                nns.tryInsert(it);
+    void NearestNeighborSearch(const Node<SubspaceData> *node, KNN &out) const {
+        assert(node != nullptr);
+        if (KD_TREE_CHECK_ALL_LIMIT >= node->data.last - node->data.first) {
+            // Base case
+            for (size_t idx = node->data.first; idx < node->data.last; idx++) {
+                out.TryInsert(idx);
             }
-            return;
         }
+        else {
+            // Recurse down the tree
+            const size_t axis = node->data.axis;
+            const double partition_value = node->data.partition_value;
 
+            const Node<SubspaceData> *go_first = node->left, *go_second = node->right;
+            if (out.P[axis] > partition_value) {
+                std::swap(go_first, go_second);
+            }
+            
+            // Recurse first on this half-space
+            NearestNeighborSearch(go_first, out);
 
-        int axis = node->data.axis;
-        const Node<PS> *goFirst = node->left, *goSecond = node->right;
-        if (nns.P[axis] > node->data.medianValue) 
-            std::swap(goFirst, goSecond);
-
-        nearestNeighborSearch(goFirst, nns);
-        // Check if we have to check the other branch
-        if (std::abs(node->data.medianValue - nns.P[axis]) < nns.maxDistance())
-            nearestNeighborSearch(goSecond, nns);
+            // Recurse on the second branch only if necessary
+            const double projlen2 = std::pow(std::abs(out.P[axis] - partition_value), 2.);
+            if (projlen2 <= out.MaxDistance()) {
+                NearestNeighborSearch(go_second, out);
+            }        
+        }
     }
+
 };
+
 
 #endif

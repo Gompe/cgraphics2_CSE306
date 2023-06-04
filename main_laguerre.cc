@@ -14,7 +14,7 @@ int main() {
 
     Vector box_center = Vector(box_side/2., box_side/2., 0.);
 
-    int N = 2;
+    int N = 5;
     double x, y;
 
     std::vector<Vector> points;
@@ -38,18 +38,17 @@ int main() {
         out.push_back(CreateDiscretizedDisk(point, 0.05, 50));
     }
     out = StandardizeCells(out, bounding_box);
-    save_svg(out, "before.svg", "blue");
+    save_svg(out, "laguerre_before.svg", "blue");
 
     // Create Laguerre Structure
     LaguerreDiagram my_diagram(points, cells, lambdas, weights, bounding_box);
     my_diagram.Optimize();
 
-    for (int i=0; i < my_diagram.cells.size(); i++) {
-        std::cout << "Cell " << i << " weight " << my_diagram.weights[i] << std::endl;
-        for (auto &p : my_diagram.cells[i].vertices)
-            std::cout << p << " ";
-        std::cout << std::endl;
+    std::cout << "Weights\n";
+    for (int i = 0; i < my_diagram.cells.size(); i++) {
+        std::cout << my_diagram.weights[i] << " ";
     }
+    std::cout << "\n";
 
     out.clear();
     out.insert(out.begin(), my_diagram.cells.begin(), my_diagram.cells.end());
@@ -58,7 +57,7 @@ int main() {
     }
     out = StandardizeCells(out, bounding_box);
 
-    save_svg(out, "after.svg", "blue");
+    save_svg(out, "laguerre_after.svg", "blue");
 
     exit(0);
 }
